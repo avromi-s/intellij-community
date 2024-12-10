@@ -311,6 +311,11 @@
     <action id="ProjectViewExpandAll" class="com.intellij.ide.projectView.actions.ProjectViewExpandAllAction"
             use-shortcut-of="ExpandAllRegions"/>
     <action id="CollapseAll" class="com.intellij.ide.actions.CollapseAllAction" icon="AllIcons.Actions.Collapseall"/>
+    <action id="CollapseRecursively" class="com.intellij.ide.projectView.actions.CollapseRecursivelyAction" icon="AllIcons.Actions.Collapseall"
+            use-shortcut-of="CollapseRegion"/>
+    <action id="ProjectViewCollapseAll" class="com.intellij.ide.projectView.actions.ProjectViewCollapseAllAction"
+            use-shortcut-of="CollapseAllRegions"/>
+
     <action id="ExportToTextFile" class="com.intellij.ide.actions.ExportToTextFileAction" icon="AllIcons.ToolbarDecorator.Export"/>
     <action id="ExpandTreeNode" class="com.intellij.ide.actions.tree.ExpandTreeNodeAction"/>
     <action id="CollapseTreeNode" class="com.intellij.ide.actions.tree.CollapseTreeNodeAction"/>
@@ -1534,6 +1539,7 @@
       <reference ref="SelectInProjectView"/>
       <reference ref="ExpandRecursively"/>
       <reference ref="ExpandAll"/>
+      <reference ref="CollapseRecursively"/>
       <reference ref="CollapseAll"/>
     </group>
 

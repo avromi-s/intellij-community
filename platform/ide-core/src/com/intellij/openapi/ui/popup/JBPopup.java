@@ -8,6 +8,7 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.NlsContexts.PopupAdvertisement;
+import com.intellij.ui.awt.AnchoredPoint;
 import com.intellij.ui.awt.RelativePoint;
 import org.intellij.lang.annotations.JdkConstants;
 import org.jetbrains.annotations.NonNls;
@@ -38,6 +39,16 @@ public interface JBPopup extends Disposable, LightweightWindow {
    */
   void showUnderneathOf(@NotNull Component componentUnder);
 
+  default void showAboveOf(@NotNull Component componentAbove, @NotNull PopupShowOptions options) {
+    show(
+      new AnchoredPoint(AnchoredPoint.Anchor.TOP_LEFT, componentAbove),
+      ((PopupShowOptionsBuilder) options)
+        .withRelativePosition(PopupRelativePosition.TOP)
+        .withDefaultPopupAnchor(AnchoredPoint.Anchor.BOTTOM_LEFT)
+        .withDefaultPopupComponentUnscaledGap(4)
+    );
+  }
+
   /**
    * Shows the popup at the specified point.
    *
@@ -45,12 +56,8 @@ public interface JBPopup extends Disposable, LightweightWindow {
    */
   void show(@NotNull RelativePoint point);
 
-  default void show(@NotNull PopupShowOptions showOptions) {
-    PopupShowOptionsImpl options = ((PopupShowOptionsBuilder)showOptions).build();
-    var owner = options.getOwner();
-    var aScreenX = options.getScreenX();
-    var aScreenY = options.getScreenY();
-    showInScreenCoordinates(owner, new Point(aScreenX, aScreenY));
+  default void show(@NotNull RelativePoint point, @NotNull PopupShowOptions options) {
+    show(point);
   }
 
   void showInScreenCoordinates(@NotNull Component owner, @NotNull Point point);

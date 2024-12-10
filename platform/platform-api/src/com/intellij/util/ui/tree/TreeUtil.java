@@ -889,6 +889,32 @@ public final class TreeUtil {
     internalSelect(tree, normalize(leadSelectionPath, minCount, keepSelectionLevel));
   }
 
+  @ApiStatus.Internal
+  public static @NotNull Promise<?> promiseCollapse(@NotNull JTree tree, int depth, @NotNull Predicate<@NotNull TreePath> predicate) {
+    AsyncPromise<?> promise = new AsyncPromise<>();
+    promiseMakeNotVisible(tree, new TreeVisitor() {
+      @Override
+      public @NotNull TreeVisitor.VisitThread visitThread() {
+        return Registry.is("ide.tree.background.collapse", true) ? VisitThread.BGT : VisitThread.EDT;
+      }
+
+      @Override
+      public @NotNull Action visit(@NotNull TreePath path) {
+        return depth < path.getPathCount()
+               ? TreeVisitor.Action.SKIP_SIBLINGS
+               : predicate.test(path)
+                 ? TreeVisitor.Action.CONTINUE
+                 : TreeVisitor.Action.SKIP_CHILDREN;
+      }
+    }, promise)
+      .onError(promise::setError)
+      .onSuccess(path -> {
+        if (promise.isCancelled()) return;
+        promise.setResult(null);
+      });
+    return promise;
+  }
+
   public static boolean isBulkExpandCollapseSupported(@NotNull JTree tree) {
     return Tree.isBulkExpandCollapseSupported() && tree instanceof Tree;
   }
@@ -1083,7 +1109,17 @@ public final class TreeUtil {
     else {
       return true;
     }
-  }
+  }  // todo as:as check if we need to mirror this for collapse all, see end of CollapseRecursivelyAction
+
+  private static boolean isIncludedInCollapseAll(@NotNull TreePath path) {
+    var value = getLastUserObject(path);
+    if (value instanceof AbstractTreeNode<?> node) {
+      return node.isIncludedInCollapseAll();
+    }
+    else {
+      return true;
+    }
+  }  // todo as:as check if we need to mirror this for collapse all, see end of CollapseRecursivelyAction
 
   public static @NotNull ActionCallback selectInTree(DefaultMutableTreeNode node, boolean requestFocus, @NotNull JTree tree) {
     return selectInTree(node, requestFocus, tree, true);
@@ -1457,6 +1493,11 @@ public final class TreeUtil {
     tree.expandPath(path);
   }
 
+  private static void collapsePathWithDebug(@NotNull JTree tree, @NotNull TreePath path) {
+    if (LOG.isTraceEnabled()) LOG.debug("tree collapse path: ", path);
+    tree.collapsePath(path);
+  }
+
   /**
    * Expands a node in the specified tree.
    *
@@ -1646,6 +1687,19 @@ public final class TreeUtil {
     });
   }
 
+  private static @NotNull Promise<TreePath> promiseMakeNotVisible(@NotNull JTree tree, @NotNull TreeVisitor visitor, @NotNull AsyncPromise<?> promise) {
+    MakeNotVisibleVisitor makeNotVisibleVisitor =
+      !(tree.getModel() instanceof TreeVisitor.Acceptor) && Tree.isBulkExpandCollapseSupported()
+      ? new BulkMakeNotVisibleVisitor(tree, visitor, promise)
+      : new BackgroundMakeNotVisibleVisitor(tree, visitor, promise);
+    if (tree instanceof Tree jbTree) {
+      jbTree.suspendExpandCollapseAccessibilityAnnouncements();
+    }
+    return promiseVisit(tree, makeNotVisibleVisitor).onProcessed(path -> {
+      makeNotVisibleVisitor.finish();
+    });
+  }
+
   private abstract static class MakeVisibleVisitor extends DelegatingEdtBgtTreeVisitor {
 
     protected final JTree tree;
@@ -1759,6 +1813,123 @@ public final class TreeUtil {
     @Override
     void finishExpanding() {
       expandPaths(tree, pathsToExpand);
+    }
+  }
+
+  private abstract static class MakeNotVisibleVisitor extends DelegatingEdtBgtTreeVisitor {
+
+    protected final JTree tree;
+    protected final @NotNull AsyncPromise<?> promise;
+    private final @NotNull Set<@NotNull TreePath> collapseRoots = new LinkedHashSet<>();
+
+    private MakeNotVisibleVisitor(@NotNull JTree tree, @NotNull TreeVisitor delegate, @NotNull AsyncPromise<?> promise) {
+      super(delegate);
+      this.tree = tree;
+      this.promise = promise;
+    }
+
+    @Override
+    public @Nullable Action preVisitEDT(@NotNull TreePath path) {
+      return promise.isCancelled() ? TreeVisitor.Action.SKIP_SIBLINGS : null;
+    }
+
+    @Override
+    public @NotNull Action postVisitEDT(@NotNull TreePath path, @NotNull TreeVisitor.Action action) {
+      if (action == TreeVisitor.Action.CONTINUE || action == TreeVisitor.Action.INTERRUPT) {
+        if (checkCancelled(path)) {
+          return TreeVisitor.Action.SKIP_SIBLINGS;
+        }
+        var model = tree.getModel();
+        if (action == TreeVisitor.Action.CONTINUE && model != null && !model.isLeaf(path.getLastPathComponent()) && !tree.isCollapsed(path)) {
+          if (!isUnderCollapseRoot(path)) {
+            collapseRoots.add(path);
+          }
+          doCollapse(path);
+        }
+      }
+      return action;
+    }
+
+    protected abstract boolean checkCancelled(@NotNull TreePath path);
+
+    protected abstract void doCollapse(@NotNull TreePath path);
+
+    private boolean isUnderCollapseRoot(@NotNull TreePath path) {
+      var parent = path.getParentPath();
+      while (parent != null) {
+        if (collapseRoots.contains(parent)) {
+          return true;
+        }
+        parent = parent.getParentPath();
+      }
+      return false;
+    }
+
+    final void finish() {
+      finishCollapsing();
+      announceCollapsed();
+    }
+
+    void finishCollapsing() { }
+
+    void announceCollapsed() {
+      if (tree instanceof Tree jbTree) {
+        jbTree.resumeExpandCollapseAccessibilityAnnouncements();
+        for (TreePath collapseRoot : collapseRoots) {
+          jbTree.fireAccessibleTreeCollapsed(collapseRoot);
+        }
+      }
+    }
+  }
+
+  private static class BackgroundMakeNotVisibleVisitor extends MakeNotVisibleVisitor {
+
+    private BackgroundMakeNotVisibleVisitor(@NotNull JTree tree, @NotNull TreeVisitor delegate, @NotNull AsyncPromise<?> promise) {
+      super(tree, delegate, promise);
+    }
+
+    @Override
+    protected boolean checkCancelled(@NotNull TreePath path) {
+      if (tree.isCollapsed(path)) {  // todo as:as check logic for this, this is as copied from expand version, just inverted to collapsed
+        return false;
+      }
+      else {
+        if (!promise.isCancelled()) {
+          if (LOG.isTraceEnabled()) LOG.debug("tree collapse canceled");
+          promise.cancel();
+        }
+        return true;
+      }
+    }
+
+    @Override
+    protected void doCollapse(@NotNull TreePath path) {
+      collapsePathWithDebug(tree, path);
+    }
+  }
+
+  private static class BulkMakeNotVisibleVisitor extends MakeNotVisibleVisitor {
+
+    private final @NotNull List<@NotNull TreePath> pathsToCollapse = new ArrayList<>();
+
+    private BulkMakeNotVisibleVisitor(@NotNull JTree tree, @NotNull TreeVisitor delegate, @NotNull AsyncPromise<?> promise) {
+      super(tree, delegate, promise);
+    }
+
+    @Override
+    protected boolean checkCancelled(@NotNull TreePath path) {
+      return false; // bulk collapse is performed in a single non-cancelable operation
+      // todo as:as check above is good logic and comment is true, this was copied from expand equivalent
+    }
+
+    @Override
+    protected void doCollapse(@NotNull TreePath path) {
+      pathsToCollapse.add(path);
+    }
+
+    @Override
+    void finishCollapsing() {
+      collapsePaths(tree, pathsToCollapse);
     }
   }
 

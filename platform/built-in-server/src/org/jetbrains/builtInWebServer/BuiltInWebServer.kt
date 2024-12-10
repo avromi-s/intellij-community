@@ -25,6 +25,7 @@ import io.netty.handler.codec.http.*
 import org.apache.commons.imaging.ImageFormats
 import org.apache.commons.imaging.Imaging
 import org.jetbrains.ide.HttpRequestHandler
+import org.jetbrains.ide.orInSafeMode
 import org.jetbrains.io.FileResponses
 import org.jetbrains.io.addNoCache
 import org.jetbrains.io.response
@@ -184,19 +185,22 @@ internal class BuiltInWebServer : HttpRequestHandler() {
       return true
     }
 
-    val authHeaders = authService.validateToken(request) ?: return false
-
-    if (project == null) return false
-
-    val path = decodedPath.substring(offset).takeIf { it.startsWith('/') }?.let { FileUtil.toCanonicalPath(it).substring(1) } ?: run {
-      HttpResponseStatus.NOT_FOUND.send(context.channel(), request, extraHeaders = authHeaders)
+    val authHeaders = authService.validateToken(request) ?: run {
+      HttpResponseStatus.BAD_REQUEST.orInSafeMode(HttpResponseStatus.NOT_FOUND).send(context.channel(), request)
       return true
     }
 
-    for (pathHandler in PATH_HANDLER_EP_NAME.extensionList) {
-      LOG.runAndLogException {
-        if (pathHandler.process(path, project, request, context, projectName, authHeaders, isCustomHost)) {
-          return true
+    val path = decodedPath.substring(offset).takeIf { it.startsWith('/') }?.let { FileUtil.toCanonicalPath(it).substring(1) } ?: run {
+      HttpResponseStatus.BAD_REQUEST.orInSafeMode(HttpResponseStatus.NOT_FOUND).send(context.channel(), request)
+      return true
+    }
+
+    if (project != null) {
+      for (pathHandler in PATH_HANDLER_EP_NAME.extensionList) {
+        LOG.runAndLogException {
+          if (pathHandler.process(path, project, request, context, projectName, authHeaders, isCustomHost)) {
+            return true
+          }
         }
       }
     }

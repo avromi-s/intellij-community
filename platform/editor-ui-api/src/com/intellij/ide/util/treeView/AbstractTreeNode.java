@@ -134,6 +134,10 @@ public abstract class AbstractTreeNode<T> extends PresentableNodeDescriptor<Abst
     return true;
   }
 
+  public boolean isIncludedInCollapseAll() {
+    return true;
+  }
+
   /**
    * Determines whether the node should be auto-expanded.
    * <p>

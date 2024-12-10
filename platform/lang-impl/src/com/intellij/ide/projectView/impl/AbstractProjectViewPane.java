@@ -675,6 +675,29 @@ public abstract class AbstractProjectViewPane implements UiCompatibleDataProvide
       protected void collapseAll(@NotNull JTree tree, boolean strict, int keepSelectionLevel) {
         super.collapseAll(tree, false, keepSelectionLevel);
       }
+
+      private boolean isCollapseAllAllowed() {
+        // todo as:as check below if logic is good for collapse, right now it's just the same as expand
+        JTree tree = getTree();
+        TreeModel model = tree == null ? null : tree.getModel();
+        return model == null || model instanceof BgtAwareTreeModel || model instanceof InvokerSupplier;
+      }
+
+      @Override
+      public boolean isCollapseAllVisible() {
+        return isCollapseAllAllowed() && Registry.is("ide.project.view.collapse.all.action.visible") &&
+               !Registry.is("ide.project.view.replace.collapse.all.with.collapse.recursively");
+      }
+
+      @Override
+      public boolean isCollapseAllEnabled() {
+        return super.isCollapseAllEnabled() && !Registry.is("ide.project.view.replace.collapse.all.with.collapse.recursively");
+      }
+
+      @Override
+      public boolean canCollapse() {
+        return isCollapseAllAllowed() && super.canCollapse();
+      }
     };
   }
 

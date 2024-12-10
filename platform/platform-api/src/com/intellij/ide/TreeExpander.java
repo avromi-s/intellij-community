@@ -24,4 +24,9 @@ public interface TreeExpander {
   default boolean isCollapseAllVisible() {
     return true;
   }
+
+  default boolean isCollapseAllEnabled() {
+    return canCollapse();
+  }
+
 }
